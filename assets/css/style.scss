@@ -1,0 +1,39 @@
+---
+---
+
+@import "jekyll-theme-minimal";
+
+@media print, screen and (max-width: 1360px) {
+	div.navigation {
+		position: absolute;
+		right: 100px;
+		top: 52px;
+	}
+	div.navigation ul {
+		position: static;
+	}
+}
+
+@media print, screen and (max-width: 720px) {
+	div.navigation {
+		position: static;
+	}
+}
+
+blockquote code {
+	font-style:normal;
+}
+
+a:hover, a:focus {
+	color:#069;
+	font-weight: normal;
+	text-decoration: underline;
+}
+
+h1, h2 {
+	margin: 30px 0 10px;
+}
+
+h3, h4, h5, h6 {
+	margin: 0 0 5px;
+}
