@@ -1,0 +1,5 @@
+ * Document and characterise special alignment requirements for masking based
+   checks.
+ * Extend __uptr support for atomic instructions.
+ * Let's keep in mind the overhead addition to do_user_addr_fault if we do the
+   fault_ip_is_kernel && search_bpf_extables trick.

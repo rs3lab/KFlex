@@ -1,0 +1,276 @@
+From dfd335627e1bc66afa31d642f2227b3907334e86 Mon Sep 17 00:00:00 2001
+From: Kumar Kartikeya Dwivedi <memxor@gmail.com>
+Date: Mon, 8 Apr 2024 05:34:23 +0000
+Subject: [PATCH] Patch
+
+Signed-off-by: Kumar Kartikeya Dwivedi <memxor@gmail.com>
+---
+ include/uapi/linux/bpf.h | 46 ++++++++++++++++++++++++++++++---
+ src/libbpf.c             | 55 +++++++++++++++++++++++++++++++++++++++-
+ src/libbpf.h             |  3 +++
+ src/libbpf.map           |  1 +
+ 4 files changed, 100 insertions(+), 5 deletions(-)
+
+diff --git a/include/uapi/linux/bpf.h b/include/uapi/linux/bpf.h
+index 9585f5345353..daaa325dce24 100644
+--- a/include/uapi/linux/bpf.h
++++ b/include/uapi/linux/bpf.h
+@@ -1010,6 +1010,7 @@ enum bpf_map_type {
+ 	BPF_MAP_TYPE_USER_RINGBUF,
+ 	BPF_MAP_TYPE_CGRP_STORAGE,
+ 	BPF_MAP_TYPE_ARENA,
++	BPF_MAP_TYPE_HEAP,
+ 	__MAX_BPF_MAP_TYPE
+ };
+ 
+@@ -1343,6 +1344,16 @@ enum bpf_addr_space_cast {
+ 	BPF_ADDR_SPACE_CAST = 1,
+ };
+ 
++enum bpf_heap_sfi_insn {
++	BPF_HEAP_SFI_GUARD = 2,
++	BPF_HEAP_SFI_GUARD_TRANS_U2K = 3,
++	BPF_HEAP_SFI_TRANS_K2U = 4,
++};
++
++enum {
++	BPF_HEAP_BTF_CAST = 5,
++};
++
+ /* flags for BPF_MAP_UPDATE_ELEM command */
+ enum {
+ 	BPF_ANY		= 0, /* create new element or update existing */
+@@ -1407,6 +1418,9 @@ enum {
+ 
+ /* Do not translate kernel bpf_arena pointers to user pointers */
+ 	BPF_F_NO_USER_CONV	= (1U << 18),
++
++/* Translate heap pointers to user pointers, and vice versa */
++	BPF_F_HEAP_TRANS	= (1U << 19),
+ };
+ 
+ /* Flags for BPF_PROG_QUERY. */
+@@ -3394,6 +3408,10 @@ union bpf_attr {
+  *			for the nexthop. If the src addr cannot be derived,
+  *			**BPF_FIB_LKUP_RET_NO_SRC_ADDR** is returned. In this
+  *			case, *params*->dmac and *params*->smac are not set either.
++ *		**BPF_FIB_LOOKUP_MARK**
++ *			Use the mark present in *params*->mark for the fib lookup.
++ *			This option should not be used with BPF_FIB_LOOKUP_DIRECT,
++ *			as it only has meaning for full lookups.
+  *
+  *		*ctx* is either **struct xdp_md** for XDP programs or
+  *		**struct sk_buff** tc cls_act programs.
+@@ -5022,7 +5040,7 @@ union bpf_attr {
+  *		bytes will be copied to *dst*
+  *	Return
+  *		The **hash_algo** is returned on success,
+- *		**-EOPNOTSUP** if IMA is disabled or **-EINVAL** if
++ *		**-EOPNOTSUPP** if IMA is disabled or **-EINVAL** if
+  *		invalid arguments are passed.
+  *
+  * struct socket *bpf_sock_from_file(struct file *file)
+@@ -5508,7 +5526,7 @@ union bpf_attr {
+  *		bytes will be copied to *dst*
+  *	Return
+  *		The **hash_algo** is returned on success,
+- *		**-EOPNOTSUP** if the hash calculation failed or **-EINVAL** if
++ *		**-EOPNOTSUPP** if the hash calculation failed or **-EINVAL** if
+  *		invalid arguments are passed.
+  *
+  * void *bpf_kptr_xchg(void *map_value, void *ptr)
+@@ -7120,6 +7138,7 @@ enum {
+ 	BPF_FIB_LOOKUP_SKIP_NEIGH = (1U << 2),
+ 	BPF_FIB_LOOKUP_TBID    = (1U << 3),
+ 	BPF_FIB_LOOKUP_SRC     = (1U << 4),
++	BPF_FIB_LOOKUP_MARK    = (1U << 5),
+ };
+ 
+ enum {
+@@ -7197,8 +7216,19 @@ struct bpf_fib_lookup {
+ 		__u32	tbid;
+ 	};
+ 
+-	__u8	smac[6];     /* ETH_ALEN */
+-	__u8	dmac[6];     /* ETH_ALEN */
++	union {
++		/* input */
++		struct {
++			__u32	mark;   /* policy routing */
++			/* 2 4-byte holes for input */
++		};
++
++		/* output: source and dest mac */
++		struct {
++			__u8	smac[6];	/* ETH_ALEN */
++			__u8	dmac[6];	/* ETH_ALEN */
++		};
++	};
+ };
+ 
+ struct bpf_redir_neigh {
+@@ -7477,4 +7507,12 @@ struct bpf_iter_num {
+ 	__u64 __opaque[1];
+ } __attribute__((aligned(8)));
+ 
++/* BPF loop iterator state */
++struct bpf_iter_loop {
++	/* opaque iterator state; having __u64 here allows to preserve correct
++	 * alignment requirements in vmlinux.h, generated from BTF
++	 */
++	__u64 __opaque[1];
++} __attribute__((aligned(8)));
++
+ #endif /* _UAPI__LINUX_BPF_H__ */
+diff --git a/src/libbpf.c b/src/libbpf.c
+index d7d8f78f8846..7d0fe87faa74 100644
+--- a/src/libbpf.c
++++ b/src/libbpf.c
+@@ -186,6 +186,7 @@ static const char * const map_type_name[] = {
+ 	[BPF_MAP_TYPE_USER_RINGBUF]             = "user_ringbuf",
+ 	[BPF_MAP_TYPE_CGRP_STORAGE]		= "cgrp_storage",
+ 	[BPF_MAP_TYPE_ARENA]			= "arena",
++	[BPF_MAP_TYPE_HEAP]			= "heap",
+ };
+ 
+ static const char * const prog_type_name[] = {
+@@ -544,6 +545,7 @@ struct bpf_map {
+ 	void **init_slots;
+ 	int init_slots_sz;
+ 	char *pin_path;
++	void *heap_addr;
+ 	bool pinned;
+ 	bool reused;
+ 	bool autocreate;
+@@ -1729,6 +1731,7 @@ static size_t bpf_map_mmap_sz(const struct bpf_map *map)
+ 	case BPF_MAP_TYPE_ARRAY:
+ 		return array_map_mmap_sz(map->def.value_size, map->def.max_entries);
+ 	case BPF_MAP_TYPE_ARENA:
++	case BPF_MAP_TYPE_HEAP:
+ 		return page_sz * map->def.max_entries;
+ 	default:
+ 		return 0; /* not supported */
+@@ -1970,6 +1973,20 @@ static struct extern_desc *find_extern_by_name(const struct bpf_object *obj,
+ 	return NULL;
+ }
+ 
++static struct extern_desc *find_extern_by_name_with_len(const struct bpf_object *obj,
++							const void *name, int len)
++{
++	const char *ext_name;
++	int i;
++
++	for (i = 0; i < obj->nr_extern; i++) {
++		ext_name = obj->externs[i].name;
++		if (strlen(ext_name) == len && strncmp(ext_name, name, len) == 0)
++			return &obj->externs[i];
++	}
++	return NULL;
++}
++
+ static int set_kcfg_value_tri(struct extern_desc *ext, void *ext_val,
+ 			      char value)
+ {
+@@ -5405,6 +5422,26 @@ retry:
+ 				goto err_out;
+ 			}
+ 		}
++
++		if (map->def.type == BPF_MAP_TYPE_HEAP) {
++			__u64 mmap_sz = bpf_map_mmap_sz(map);
++			__u64 it, addr;
++			for (it = 0, addr = roundup(1UL << 48, mmap_sz); addr && it < 1024; it++, addr -= mmap_sz) {
++				map->heap_addr = mmap((void *)addr, mmap_sz, PROT_READ | PROT_WRITE,
++						      MAP_SHARED | MAP_FIXED_NOREPLACE, map->fd, 0);
++				if (map->heap_addr == MAP_FAILED)
++					continue;
++				else
++					break;
++			}
++			if (map->heap_addr == MAP_FAILED) {
++				err = -errno;
++				map->heap_addr = NULL;
++				pr_warn("failed to mmap heap map '%s': %d\n",
++					map->name, err);
++				goto err_out;
++			}
++		}
+ 	}
+ 
+ 	return 0;
+@@ -7986,6 +8023,9 @@ static int bpf_object__sanitize_maps(struct bpf_object *obj)
+ 	return 0;
+ }
+ 
++typedef int (*kallsyms_cb_t)(unsigned long long sym_addr, char sym_type,
++			     const char *sym_name, void *ctx);
++
+ int libbpf_kallsyms_parse(kallsyms_cb_t cb, void *ctx)
+ {
+ 	char sym_type, sym_name[500];
+@@ -8026,8 +8066,13 @@ static int kallsyms_cb(unsigned long long sym_addr, char sym_type,
+ 	struct bpf_object *obj = ctx;
+ 	const struct btf_type *t;
+ 	struct extern_desc *ext;
++	char *res;
+ 
+-	ext = find_extern_by_name(obj, sym_name);
++	res = strstr(sym_name, ".llvm.");
++	if (sym_type == 'd' && res)
++		ext = find_extern_by_name_with_len(obj, sym_name, res - sym_name);
++	else
++		ext = find_extern_by_name(obj, sym_name);
+ 	if (!ext || ext->type != EXT_KSYM)
+ 		return 0;
+ 
+@@ -8878,6 +8923,9 @@ int bpf_object__unpin(struct bpf_object *obj, const char *path)
+ 
+ static void bpf_map__destroy(struct bpf_map *map)
+ {
++	if (map->heap_addr)
++		munmap(map->heap_addr, bpf_map_mmap_sz(map));
++
+ 	if (map->inner_map) {
+ 		bpf_map__destroy(map->inner_map);
+ 		zfree(&map->inner_map);
+@@ -10423,6 +10471,11 @@ int bpf_map__get_next_key(const struct bpf_map *map,
+ 	return bpf_map_get_next_key(map->fd, cur_key, next_key);
+ }
+ 
++void *bpf_map__heap_address(const struct bpf_map *map)
++{
++	return map->heap_addr;
++}
++
+ long libbpf_get_error(const void *ptr)
+ {
+ 	if (!IS_ERR_OR_NULL(ptr))
+diff --git a/src/libbpf.h b/src/libbpf.h
+index f88ab50c0229..9e61d6191e10 100644
+--- a/src/libbpf.h
++++ b/src/libbpf.h
+@@ -1195,6 +1195,9 @@ LIBBPF_API int bpf_map__lookup_and_delete_elem(const struct bpf_map *map,
+ LIBBPF_API int bpf_map__get_next_key(const struct bpf_map *map,
+ 				     const void *cur_key, void *next_key, size_t key_sz);
+ 
++// TODO(kkd): Document, also, what happens before create, maybe return error?
++LIBBPF_API void *bpf_map__heap_address(const struct bpf_map *map);
++
+ struct bpf_xdp_set_link_opts {
+ 	size_t sz;
+ 	int old_fd;
+diff --git a/src/libbpf.map b/src/libbpf.map
+index 51732ecb1385..ad8f419d68bc 100644
+--- a/src/libbpf.map
++++ b/src/libbpf.map
+@@ -392,6 +392,7 @@ LIBBPF_1.2.0 {
+ 
+ LIBBPF_1.3.0 {
+ 	global:
++		bpf_map__heap_address;
+ 		bpf_obj_pin_opts;
+ 		bpf_object__unpin;
+ 		bpf_prog_detach_opts;
+-- 
+2.43.0
+
