@@ -1,3 +1,15 @@
+# UNMAINTAINED
+
+Code in this repo and patches for the kernel are unmaintained. Please use upstream equivalents instead for your usecase, and use the upstream kernel for comparison purposes:
+
+- Heaps: [BPF arenas](https://lwn.net/Articles/961941). Only max 4GB size is supported, > 4GB would need a [different sandboxing scheme](https://github.com/rs3lab/KFlex-linux/commit/d110fff5d1f513a6477a8a856572941b53e6e7cc), but 4GB should be enough for most users. This relies on LLVM 19 or greater to emit proper `addr_space_cast` instructions when compiling the BPF program using arenas.
+- Loop termination: [cond_break macro](https://lwn.net/Articles/964381/), [timed cond_break](https://lore.kernel.org/bpf/20250304003239.2390751-1-memxor@gmail.com/). The timed variant (on x86 and arm64) uses rdtsc-sampling on the local CPU instead of reading from an address repeatedly, as described in the "Discussion" section's "Faster extension stall recovery." paragraph. Soon, this will be integrated with cancellations to terminate loops stuck for a long period.
+- Spin Locks: [Spin Locks for BPF arenas](https://lore.kernel.org/bpf/20250306035431.2186189-1-memxor@gmail.com). The `kflex_spin_lock` in the paper was a MCS-lock variant, this is the upstream version based on the qspinlock algorithm.
+- Cancellations: [WIP patches can be applied on top of bpf-next](https://lore.kernel.org/bpf/20240201042109.1150490-1-memxor@gmail.com). There are discussions on implementing cancellations differently, without unwinding and using a ["fast-execute" approach of speeding up execution until the end of the program](https://lpc.events/event/17/contributions/1610/attachments/1229/2505/LPC_BPF_termination_Raj_Sahu.pdf). Either way, once implemented, this primitive will allow terminating the execution of programs stuck inside the kernel.
+
+##
+##
+
 # Fast, Flexible, and Practical Kernel Extensions
 
 The ability to safely extend OS kernel functionality is a long-standing goal in OS design, with the widespread use of the eBPF framework in Linux and Windows demonstrating the benefits of such extensibility. However, existing solutions for kernel extensibility (including eBPF) are limited and constrain users either in the extent of functionality that they can offload to the kernel or the performance overheads incurred by their extensions.
