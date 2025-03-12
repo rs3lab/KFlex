@@ -1,6 +1,6 @@
 # UNMAINTAINED
 
-Code in this repo and patches for the kernel are unmaintained. Please use upstream equivalents instead for your usecase, and use the upstream kernel for comparison purposes:
+Code in this repo and patches for the kernel are **unmaintained**. **Please use upstream equivalents** instead for your usecase, and **use the upstream kernel for comparison purposes**:
 
 - Heaps: [BPF arenas](https://lwn.net/Articles/961941). Only max 4GB size is supported, > 4GB would need a [different sandboxing scheme](https://github.com/rs3lab/KFlex-linux/commit/d110fff5d1f513a6477a8a856572941b53e6e7cc), but 4GB should be enough for most users. This relies on LLVM 19 or greater to emit proper `addr_space_cast` instructions when compiling the BPF program using arenas.
 - Loop termination: [cond_break macro](https://lwn.net/Articles/964381/), [timed cond_break](https://lore.kernel.org/bpf/20250304003239.2390751-1-memxor@gmail.com/). The timed variant (on x86 and arm64) uses rdtsc-sampling on the local CPU instead of reading from an address repeatedly, as described in the "Discussion" section's "Faster extension stall recovery." paragraph. Soon, this will be integrated with cancellations to terminate loops stuck for a long period.
